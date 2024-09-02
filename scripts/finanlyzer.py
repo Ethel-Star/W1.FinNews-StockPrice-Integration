@@ -192,3 +192,87 @@ def plot_and_calculate_correlations(data_paths, filter_dates=None):
     for symbol, corr in correlations.items():
         interpretation = get_correlation_interpretation(corr)
         print(f"{symbol}: {corr:.2f} - {interpretation}")
+
+
+# Aggregate Average Sentiment
+
+def compute_and_merge_sentiment(df, date_col='Date', sentiment_col='sentiment'):
+    df[date_col] = pd.to_datetime(df[date_col])
+    avg_sentiment_df = df.groupby(date_col)[sentiment_col].mean().reset_index()
+    avg_sentiment_df.rename(columns={sentiment_col: 'Average_Daily_Sentiment'}, inplace=True)
+    merged_df = pd.merge(df, avg_sentiment_df, on=date_col, how='left')
+    
+    return merged_df
+
+
+# Function to process average sentiment data
+def process_data_avg(data_paths, avg_sentiment_paths, output_directory):
+    os.makedirs(output_directory, exist_ok=True)
+    
+    for symbol, data_path in data_paths.items():
+        df = pd.read_csv(data_path)
+        avg_sentiment_df = pd.read_csv(avg_sentiment_paths[symbol])
+        
+        df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
+        avg_sentiment_df['Date'] = pd.to_datetime(avg_sentiment_df['Date'], errors='coerce')
+        
+        combined_df = pd.merge(df, avg_sentiment_df[['Date', 'Average_Daily_Sentiment']], on='Date', how='inner')
+        combined_df['Return'] = combined_df['Close'].pct_change()
+        combined_df.dropna(subset=['Return', 'Average_Daily_Sentiment'], inplace=True)
+        
+        output_file = os.path.join(output_directory, f'processed_{symbol.lower()}_data_with_avg_sentiment.csv')
+        combined_df.to_csv(output_file, index=False)
+        print(f'Processed data for {symbol} saved to {output_file}')
+
+# Function to plot and calculate correlations with average sentiment
+# Function to plot and calculate correlations
+def plot_and_calculate_correlations_avg(data_paths, filter_dates=None):
+    processed_data_avg = {}
+    for symbol, path in data_paths.items():
+        df = pd.read_csv(path)
+        
+        # Get full date range
+        start_date_full, end_date_full = get_date_range(df)
+        
+        if filter_dates:
+            start_date_filtered, end_date_filtered = filter_dates
+            df_filtered = process_data(df, filter_dates)
+            processed_data_avg[symbol] = df_filtered
+            print(f'{symbol} - Filtered Date Range: {start_date_filtered} to {end_date_filtered}')
+        else:
+            processed_data_avg[symbol] = process_data(df, (start_date_full, end_date_full))
+            
+        print(f'{symbol} - Full Date Range: {start_date_full} to {end_date_full}')
+        print('---')
+        
+    colors = {
+        'AAPL': 'blue',
+        'AMZN': 'green',
+        'GOOG': 'red',
+        'NVDA': 'purple',
+        'TSLA': 'orange'
+    }
+
+    fig, axes = plt.subplots(3, 2, figsize=(15, 18))
+    axes = axes.flatten()
+
+    correlations = {}
+    for i, (symbol, df) in enumerate(processed_data_avg.items()):
+        correlation = df['Return'].corr(df['Average_Daily_Sentiment'])
+        correlations[symbol] = correlation
+
+        sns.scatterplot(x='Average_Daily_Sentiment', y='Return', data=df, ax=axes[i], color=colors[symbol])
+        axes[i].set_title(f'{symbol}: Average_Daily_Sentiment vs. Return\nCorrelation: {correlation:.2f}')
+        axes[i].set_xlabel('Sentiment Score')
+        axes[i].set_ylabel('Daily Return')
+        
+    if len(processed_data_avg) < 6:
+        fig.delaxes(axes[len(processed_data_avg)])
+
+    plt.tight_layout()
+    plt.show()
+
+    print("Pearson Correlations between Daily Returns and Sentiment Scores:")
+    for symbol, corr in correlations.items():
+        interpretation = get_correlation_interpretation(corr)
+        print(f"{symbol}: {corr:.2f} - {interpretation}")
